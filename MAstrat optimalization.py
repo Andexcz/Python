@@ -18,7 +18,7 @@ vysledky = []
 
 print("Testuji různé délky SMA (to může chvilku trvat)...")
 
-# 2. CYKLUS PRO RŮZNÉ SMA (Zkoušíme od 20 do 200 po kroku 10)
+# 2. CYKLUS PRO RŮZNÉ SMA (Zkoušíme od 20 do 200 po kroku 1)
 for delka_sma in range(20, 210, 1):
     
     # Vytvoříme kopii dat, abychom si je nerozbili

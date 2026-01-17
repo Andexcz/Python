@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Stahování dat
-data = yf.download("BTC-USD", start="2010-01-01")
+data = yf.download("AMZN", start="2010-01-01")
 
 if isinstance(data.columns, pd.MultiIndex):
     data.columns = data.columns.droplevel(1)
