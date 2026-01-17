@@ -1,0 +1,155 @@
+import yfinance as yf
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Stahování dat
+data = yf.download("BTC-USD", start="2010-01-01")
+
+if isinstance(data.columns, pd.MultiIndex):
+    data.columns = data.columns.droplevel(1)
+
+# Příprava dat
+weekly_df = pd.DataFrame()
+weekly_df["Close"] = data["Close"].resample('W').last()
+weekly_df["Low"] = data["Low"].resample('W').min()
+weekly_df["High"] = data["High"].resample('W').max()
+weekly_df["SMA_50"] = weekly_df["Close"].rolling(window=38).mean()
+
+weekly_df.dropna(inplace=True)
+
+# --- Proměnné pro strategii ---
+pozice = 0 # 0 = Nic, 1 = Long, -1 = Short
+setup_long = False
+setup_short = False
+
+moje_entry_cena = 0
+moje_sl_cena = 0
+moje_tp_cena = 0
+
+# --- Proměnné pro PENÍZE (Equity) ---
+kapital = 10000  # Začínáme s 10 000 USD
+equity_historie = [kapital] # Sem budeme ukládat stav účtu po každém obchodu
+equity_datumy = [weekly_df.index[0]] # Datumy pro graf
+
+# Seznamy pro grafy vstupů
+signal_entry_long = []
+signal_entry_short = []
+signal_tp = []
+signal_sl = []
+
+print(f"🏁 Startovní kapitál: {kapital} USD")
+print("-" * 40)
+
+for i in range(2, len(weekly_df)):
+    # Data
+    cena = weekly_df["Close"].iloc[i]
+    low = weekly_df["Low"].iloc[i]
+    high = weekly_df["High"].iloc[i]
+    sma = weekly_df["SMA_50"].iloc[i]
+    datum = weekly_df.index[i]
+    
+    cena_minule = weekly_df["Close"].iloc[i-1]
+    sma_minule = weekly_df["SMA_50"].iloc[i-1]
+    cena_predminule = weekly_df["Close"].iloc[i-2]
+    sma_predminule = weekly_df["SMA_50"].iloc[i-2]
+
+    # ---------------------------------------------------
+    # A) POKUD NEJSME V POZICI
+    # ---------------------------------------------------
+    if pozice == 0:
+        # 1. Hledáme Setupy
+        if cena_minule > sma_minule and cena_predminule > sma_predminule:
+            setup_long = True
+            setup_short = False 
+        elif cena_minule < sma_minule and cena_predminule < sma_predminule:
+            setup_short = True
+            setup_long = False
+
+        # 2. Rušení setupu (Tvoje bezpečná varianta - nejdřív kontrolujeme Close)
+        if setup_long and cena < sma:
+            setup_long = False
+        if setup_short and cena > sma:
+            setup_short = False
+
+        # 3. Vstupy
+        if setup_long and low <= sma:
+            pozice = 1
+            setup_long = False
+            moje_entry_cena = sma 
+            moje_sl_cena = moje_entry_cena * 0.98
+            moje_tp_cena = moje_entry_cena * 1.10
+            signal_entry_long.append(datum)
+
+        elif setup_short and high >= sma:
+            pozice = -1
+            setup_short = False
+            moje_entry_cena = sma
+            moje_sl_cena = moje_entry_cena * 1.03
+            moje_tp_cena = moje_entry_cena * 0.90
+            signal_entry_short.append(datum)
+
+    # ---------------------------------------------------
+    # B) POKUD JSME V POZICI (Výpočet zisku/ztráty)
+    # ---------------------------------------------------
+    elif pozice == 1: # LONG
+        if low <= moje_sl_cena: # Stop Loss
+            pozice = 0
+            signal_sl.append(datum)
+            kapital = kapital * 0.98 # Ztratili jsme 3%
+            equity_historie.append(kapital)
+            equity_datumy.append(datum)
+            print(f"❌ LONG SL | Zůstatek: {kapital:.0f} USD")
+        
+        elif high >= moje_tp_cena: # Take Profit
+            pozice = 0
+            signal_tp.append(datum)
+            kapital = kapital * 1.10 # Vydělali jsme 10%
+            equity_historie.append(kapital)
+            equity_datumy.append(datum)
+            print(f"💰 LONG TP | Zůstatek: {kapital:.0f} USD")
+
+    elif pozice == -1: # SHORT
+        if high >= moje_sl_cena: # Stop Loss
+            pozice = 0
+            signal_sl.append(datum)
+            kapital = kapital * 0.98 # Ztráta 3%
+            equity_historie.append(kapital)
+            equity_datumy.append(datum)
+            print(f"❌ SHORT SL | Zůstatek: {kapital:.0f} USD")
+        
+        elif low <= moje_tp_cena: # Take Profit
+            pozice = 0
+            signal_tp.append(datum)
+            kapital = kapital * 1.10 # Zisk 10
+            equity_historie.append(kapital)
+            equity_datumy.append(datum)
+            print(f"💰 SHORT TP | Zůstatek: {kapital:.0f} USD")
+
+# Výpis výsledku
+zisk_procenta = ((kapital - 10000) / 10000) * 100
+print("-" * 40)
+print(f"KONEC TESTU. Konečný kapitál: {kapital:.0f} USD")
+print(f"Celkové zhodnocení: {zisk_procenta:.2f} %")
+
+# --- GRAFY (Dva pod sebou) ---
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+
+# Graf 1: Cena a Signály
+ax1.plot(weekly_df.index, weekly_df["Close"], color="black", alpha=0.5, label="Cena")
+ax1.plot(weekly_df.index, weekly_df["SMA_50"], color="blue", label="SMA 50")
+ax1.scatter(signal_entry_long, weekly_df.loc[signal_entry_long]["SMA_50"], marker="^", color="green", s=100, label="Long")
+ax1.scatter(signal_entry_short, weekly_df.loc[signal_entry_short]["SMA_50"], marker="v", color="red", s=100, label="Short")
+ax1.scatter(signal_tp, weekly_df.loc[signal_tp]["Close"], marker="P", color="gold", edgecolors='black', s=100, zorder=5)
+ax1.scatter(signal_sl, weekly_df.loc[signal_sl]["Close"], marker="X", color="black", s=80, zorder=5)
+ax1.set_title("Strategie a Signály")
+ax1.legend()
+ax1.grid(True, alpha=0.3)
+
+# Graf 2: Vývoj peněz (Equity Curve)
+ax2.plot(equity_datumy, equity_historie, color="green", linewidth=2, marker="o")
+ax2.axhline(y=10000, color='red', linestyle='--', label="Startovní čára") # Červená čára startu
+ax2.set_title("Vývoj kapitálu (Equity Curve)")
+ax2.set_ylabel("USD")
+ax2.grid(True, alpha=0.3)
+
+plt.show()
